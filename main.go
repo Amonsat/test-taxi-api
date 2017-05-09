@@ -15,52 +15,47 @@ const maxRequests = 50
 var requests [maxRequests]string
 var statistics map[string]int
 
-var cUser chan string
-var cCounter chan string
-var cChanger chan int
-var cRander chan int
-var cStatistic chan string
-var cGetStatistic chan bool
+var cCmd chan string
+var cOut chan string
 
 func main() {
 	statistics = make(map[string]int)
 	generateBaseReqeusts()
 
-	cUser = make(chan string)
-	cCounter = make(chan string)
-	cRander = make(chan int)
-	cChanger = make(chan int)
-	cStatistic = make(chan string)
-	cGetStatistic = make(chan bool)
+	cCmd = make(chan string)
+	cOut = make(chan string)
 
-	go func() {
-		for {
-			select {
-			case randInt := <-cChanger:
-				name := tools.RandStringRunes(2)
-				println("change name " + requests[randInt] + " to " + name)
-				requests[randInt] = name
-			case randInt := <-cRander:
-				rName := requests[randInt]
-				cUser <- rName
-				statistics[rName] = statistics[rName] + 1
-			case <-cGetStatistic:
-				println("get stat")
-				var text string
-				for i, v := range statistics {
-					text += i + ": " + strconv.Itoa(v) + "\n"
-				}
-				cStatistic <- text
-			}
-		}
-	}()
+	go worker()
 
 	go tools.DoEvery(200*time.Millisecond, func(t time.Time) {
-		cChanger <- rand.Intn(maxRequests)
+		cCmd <- "change"
 	})
 
 	http.HandleFunc("/", handler)
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func worker() {
+	for {
+		command := <-cCmd
+		switch command {
+		case "change":
+			randInt := rand.Intn(maxRequests)
+			name := tools.RandStringRunes(2)
+			requests[randInt] = name
+		case "getReq":
+			randInt := rand.Intn(maxRequests)
+			rName := requests[randInt]
+			cOut <- rName
+			statistics[rName] = statistics[rName] + 1
+		case "getStat":
+			var stat string
+			for i, v := range statistics {
+				stat += i + ": " + strconv.Itoa(v) + "\n"
+			}
+			cOut <- stat
+		}
+	}
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -74,14 +69,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func printRequest(w http.ResponseWriter) {
-	cRander <- rand.Intn(maxRequests)
-	req := <-cUser
+	cCmd <- "getReq"
+	req := <-cOut
 	fmt.Fprintf(w, "Get random reqest: %s", req)
 }
 
 func printAllRequests(w http.ResponseWriter) {
-	cGetStatistic <- true
-	text := <-cStatistic
+	cCmd <- "getStat"
+	text := <-cOut
 	fmt.Fprintf(w, "%s", text)
 }
 
